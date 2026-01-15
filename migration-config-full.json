@@ -1,0 +1,34 @@
+{
+    "hierarchy_levels": [
+        "Group",
+        "Department",
+        "Status",
+        "Year",
+        "Month",
+        "Employee",
+        "SubFolder"
+    ],
+    "folders_to_skip": [
+        "Month"
+    ],
+    "path_template": "myRecords/{{Group}}/{{Department}}/{{Status}}/{{Year}}/{{Employee}}/{{SubFolder}}/{{FileName}}",
+    "regex_rewrites": {
+        "Employee": {
+            "pattern": "^(.*)\\s+\\(\\s*(\\d+)\\s*\\)$",
+            "replacement": "\\1_\\2"
+        }
+    },
+    "form_fields_to_extract": [
+        "Classification",
+        "Quick Reference",
+        "Document Date",
+        "Lifespan",
+        "Offsite Location",
+        "On-Premises Location",
+        "Remarks",
+        "Category",
+        "Keywords",
+        "doctype"
+    ],
+    "merge_strategy": "merge_into_destination"
+}

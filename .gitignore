@@ -13,6 +13,8 @@ poc_storage/
 source_system/
 metadata/
 config/
+source_system/
+final_storage_flattened/
 
 # Logs and Metadata (if they contain sensitive/large data)
 logs/*.csv

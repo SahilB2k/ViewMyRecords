@@ -1,4 +1,0 @@
-{
-  "levels": ["dept", "project"],
-  "filename_pattern": "{original_name}"
-}
