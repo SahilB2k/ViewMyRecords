@@ -9,6 +9,10 @@ venv/
 staging/
 final_storage/
 dummy_source/
+poc_storage/
+source_system/
+metadata/
+config/
 
 # Logs and Metadata (if they contain sensitive/large data)
 logs/*.csv
