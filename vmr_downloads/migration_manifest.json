@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-01-16T23:05:04.422811",
+  "total_files": 5,
+  "files": [
+    {
+      "filename": "MAVROS (1).pdf",
+      "path": "vmr_downloads\\HR\\Live Employee\\1997\\11_Nov\\E SAHILJADHAV(12345)\\Internal Use\\MAVROS (1).pdf",
+      "metadata": {},
+      "status": "success"
+    },
+    {
+      "filename": "resume.md",
+      "path": "vmr_downloads\\HR\\Live Employee\\1997\\11_Nov\\E TAMILSELVEN (13356)\\internal Use\\resume.md",
+      "metadata": {},
+      "status": "success"
+    },
+    {
+      "filename": "Sahil_Jadhav_Resume (6).pdf",
+      "path": "vmr_downloads\\HR\\Live Employee\\1997\\11_Nov\\E TAMILSELVEN (13356)\\internal Use\\Sahil_Jadhav_Resume (6).pdf",
+      "metadata": {},
+      "status": "success"
+    },
+    {
+      "filename": "demo_Invoice.pdf",
+      "path": "vmr_downloads\\HR\\Seperated Employee\\1999\\11_Nov\\E_DEVRAM(23234)\\Internal Use\\demo_Invoice.pdf",
+      "metadata": {},
+      "status": "success"
+    },
+    {
+      "filename": "superstore (Repaired).xlsx",
+      "path": "vmr_downloads\\HR\\Seperated Employee\\1999\\12_Nov\\E SAIRAJ(27364)\\Internal Use\\superstore (Repaired).xlsx",
+      "metadata": {},
+      "status": "success"
+    }
+  ]
+}
