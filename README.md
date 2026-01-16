@@ -1,42 +1,19 @@
-# Unified Data Migration & Ingestion Prototype
+# VMR Crawler Stability Refinement
 
-A specialized tooling suite designed to automate the extraction, transformation, and loading (ETL) of high-value documents from complex web sources (arXiv, Indian Patent Office) and local staging environments into a structured, queryable storage format.
+This project aims to finalize and stabilize the VMR (ViewMyRecords) crawler for production.
 
-This system emphasizes **resilience**, **metadata preservation**, and **hierarchy flattening ("squashing")** to optimize for subsequent RAG (Retrieval-Augmented Generation) or archival workflows.
+## Features
+- SPA-aware navigation (breadcrumbs, back-button, ".." folder)
+- Session conflict handling ("Login Here" button)
+- Resilient folder and file detection
+- Recursive discovery with duplicate prevention
+- Metadata extraction (sidecar JSON files)
+- Batch processing and error recovery
 
-### Run Full Migration Engine (Web Crawl + Form Metadata)
-The standard engine that simulates a recursive web crawl, scrapes form metadata, and flattens deep hierarchies by skipping levels (e.g., Month) and renaming folders via Regex.
-1. Define rules in `migration-config-full.json`
-2. Start server: `python -m http.server 8000`
-3. Run: `python full_migration_engine.py`
+## Prerequisites
+- Python 3.8+
+- Playwright (`pip install playwright` then `playwright install`)
 
-### Run Optimized Engine (For Scale / 100k+ Files)
-Optimized for high-volume migrations with **Resumability** and **Fast Logging**.
-- **JSONL Manifest**: Uses `migration_manifest.jsonl` for O(1) append performance.
-- **State Awareness**: Skips already migrated files if interrupted.
-```bash
-python full_migration_engine_optimized.py
-```
-
----
-
-## 📂 Project Structure
-
-```text
-migration-prototype/
-├── config/                 # Configuration files for structure mapping
-│   └── structure_config.json
-├── logs/                   # Execution logs (CSV audit trails & errors)
-├── metadata/               # Source metadata indices (file_index.json)
-├── staging/                # Input location for local file migration
-├── web_ui/                 # Prototype dashboard (HTML)
-├── full_migration_engine.py   # Full recursive web crawler & path flattener
-└── migration-config-full.json # Rules for full migration (regex & skip logic)
-```
-
-
-## 📝 Logging & Auditing
-
-The system maintains a rigorous audit trail in the `logs/` directory:
-- **migration_log.csv:** A structured CSV recording `timestamp`, `source_path`, `target_path`, and `index_id` for every moved file.
-- **error_log.txt:** Captures detailed stack traces for any failed downloads or transfer errors.
+## Usage
+1. Set environment variables: `VMR_CORPORATE_ID`, `VMR_USERNAME`, `VMR_PASSWORD`.
+2. Run the script: `python production_migration_engine.py`.
