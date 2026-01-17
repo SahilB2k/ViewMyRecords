@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 venv/
 .env
+vmr_downloads/
+vmr_migration.zip
+config.json
 
 # Project specific staging and storage
 staging/

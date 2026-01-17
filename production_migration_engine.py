@@ -5,13 +5,18 @@ import time
 import zipfile
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (in parent directory)
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
 # -----------------------------
 # CREDENTIALS & CONFIG
 # -----------------------------
-VMR_CORPORATE_ID = os.getenv("VMR_CORPORATE_ID", "tvsm_hr")
-VMR_USERNAME = os.getenv("VMR_USERNAME", "tvshr_sahil")
-VMR_PASSWORD = os.getenv("VMR_PASSWORD", "Sahil@12")
+# Use keys exactly as defined in your .env file
+VMR_CORPORATE_ID = os.getenv("VMW_CORPORATE_USERID")
+VMR_USERNAME = os.getenv("VRM_USER_NAME")
+VMR_PASSWORD = os.getenv("VMR_USER_PASSWORD")
 
 CONFIG_FILE = "config.json"
 OUTPUT_DIR = "vmr_downloads"
@@ -201,66 +206,174 @@ def navigate_to_path(page_obj, path_list):
 # -----------------------------
 # METADATA EXTRACTION
 # -----------------------------
-def extract_file_metadata(page_obj, row):
-    """Extract metadata from file info dialog."""
+def extract_file_metadata(page_obj, filename):
+    """Extract metadata from file info dialog by finding the file in the grid."""
     metadata = {}
     
     try:
-        # Click info button
-        info_btn = row.locator("a[onclick*='viewDocumentDetails'], img[src*='info'], a[title*='info' i], i.fa-info")
-        if info_btn.count() == 0:
+        print(f"      Extracting metadata...")
+        
+        # Find the file by filename in the grid
+        file_span = page_obj.locator("span.mail-sender").filter(has_text=filename)
+        
+        if file_span.count() == 0:
+            print(f"      [Warning] Could not locate file in grid: {filename}")
             return metadata
         
-        info_btn.first.click()
-        page_obj.wait_for_timeout(2000)
+        # Try multiple strategies to find the parent container with the info button
+        info_anchor = None
         
-        # Extract all metadata fields
-        metadata_fields = [
-            "Classification",
-            "Document Sub Type",
-            "Quick Reference",
-            "Document Date",
-            "Expiry Date",
-            "Lifespan",
-            "Offsite Location",
-            "On-Premises Location",
-            "Remarks",
-            "Category",
-            "Keywords",
-            "doctype"
-        ]
+        # Strategy 1: Look for parent li with class 'pdli '
+        parent_li = file_span.first.locator("xpath=ancestor::li[@class='pdli ']")
+        if parent_li.count() > 0:
+            info_anchor = parent_li.locator("a[onclick*='showRecordIndexingView']")
         
-        for field in metadata_fields:
+        # Strategy 2: Look for parent li without specific class
+        if not info_anchor or info_anchor.count() == 0:
+            parent_li = file_span.first.locator("xpath=ancestor::li")
+            if parent_li.count() > 0:
+                info_anchor = parent_li.first.locator("a[onclick*='showRecordIndexingView']")
+        
+        # Strategy 3: Look in parent tr (table row)
+        if not info_anchor or info_anchor.count() == 0:
+            parent_tr = file_span.first.locator("xpath=ancestor::tr")
+            if parent_tr.count() > 0:
+                info_anchor = parent_tr.first.locator("a[onclick*='showRecordIndexingView']")
+        
+        # Strategy 4: Search nearby in the DOM
+        if not info_anchor or info_anchor.count() == 0:
+            # Look for any info button in the same row/container
+            info_anchor = page_obj.locator("a[onclick*='showRecordIndexingView']").filter(has_text="")
+        
+        if not info_anchor or info_anchor.count() == 0:
+            print(f"      [Warning] Info button not found for file")
+            return metadata
+        
+        # Click the first matching info button
+        print(f"      [DEBUG] Clicking info button...")
+        info_anchor.first.click()
+        page_obj.wait_for_timeout(3000)
+        
+        # Wait for the metadata panel to appear
+        panel = page_obj.locator("#indexingDiv2")
+        if panel.count() == 0 or not panel.is_visible():
+            print(f"      [Warning] Metadata panel did not appear")
+            return metadata
+        
+        print(f"      Metadata panel opened successfully")
+        
+        # Extract Classification
+        try:
+            selected_option = page_obj.locator("#fileContentType option[selected]")
+            if selected_option.count() == 0:
+                # Try to get the currently selected value
+                selected_value = page_obj.locator("#fileContentType").evaluate("el => el.value")
+                if selected_value and selected_value != "select":
+                    selected_text = page_obj.locator(f"#fileContentType option[value='{selected_value}']").inner_text()
+                    metadata["Classification"] = selected_text
+            else:
+                classification = selected_option.inner_text()
+                if classification != "Select":
+                    metadata["Classification"] = classification
+        except Exception as e:
+            print(f"      [Debug] Classification extraction failed: {e}")
+        
+        # Extract Document Sub Type - try multiple dropdown IDs
+        try:
+            dropdown_ids = [
+                "#vmr_hrrecruitmentdropdown",
+                "#vmr_hrannualreviewdropdown", 
+                "#vmr_hrcurrentemploymentdropdown",
+                "#vmr_hreducationaldropdown",
+                "#vmr_hrexitdropdown",
+                "#vmr_hrpastemploymentdropdown",
+                "#vmr_hrpersonalkycdropdown",
+                "#vmr_hrstatutorydropdown",
+                "#vmr_hrverificationdropdown"
+            ]
+            
+            for dropdown_id in dropdown_ids:
+                if page_obj.locator(dropdown_id).count() > 0:
+                    selected_val = page_obj.locator(dropdown_id).evaluate("el => el.value")
+                    if selected_val:
+                        metadata["Document Sub Type"] = selected_val
+                        break
+        except Exception as e:
+            print(f"      [Debug] Document Sub Type extraction failed: {e}")
+        
+        # Extract input field values
+        field_mappings = {
+            "Quick Reference": "#vmr_quickref",
+            "Document Date": "#vmr_docdate",
+            "Expiry Date": "#vmr_expirydate",
+            "Offsite Location": "#vmr_geotag",
+            "On-Premises Location": "#vmr_offpremise",
+            "Remarks": "#vmr_remarks",
+            "Keywords": "#vmr_keywords",
+            "Document Type": "#vmr_doctype",
+            "Document SubType Internal": "#vmr_docsubtype"
+        }
+        
+        for field_name, selector in field_mappings.items():
             try:
-                # Try to find label and value
-                label = page_obj.locator(f"text='{field}'").or_(
-                    page_obj.locator(f"label:has-text('{field}')")
-                )
-                
-                if label.count() > 0:
-                    # Get next element (usually contains value)
-                    value_elem = label.first.locator("xpath=following-sibling::*[1]")
-                    if value_elem.count() > 0:
-                        metadata[field] = value_elem.inner_text().strip()
-                    else:
-                        # Try parent row approach
-                        row_elem = label.first.locator("xpath=ancestor::tr[1]")
-                        if row_elem.count() > 0:
-                            cells = row_elem.locator("td").all()
-                            if len(cells) > 1:
-                                metadata[field] = cells[1].inner_text().strip()
-            except:
-                continue
+                if page_obj.locator(selector).count() > 0:
+                    value = page_obj.locator(selector).input_value()
+                    if value and value.strip():
+                        metadata[field_name] = value.strip()
+            except Exception as e:
+                print(f"      [Debug] {field_name} extraction failed: {e}")
         
-        # Close dialog
-        page_obj.keyboard.press("Escape")
-        page_obj.wait_for_timeout(500)
+        # Extract Lifespan
+        try:
+            if page_obj.locator("#vmr_doclifespan").count() > 0:
+                lifespan_value = page_obj.locator("#vmr_doclifespan").evaluate("el => el.value")
+                if lifespan_value and lifespan_value != "0":
+                    metadata["Lifespan"] = lifespan_value
+        except Exception as e:
+            print(f"      [Debug] Lifespan extraction failed: {e}")
+        
+        # Extract Category
+        try:
+            if page_obj.locator("#vmr_category").count() > 0:
+                category_value = page_obj.locator("#vmr_category").evaluate("el => el.value")
+                if category_value:
+                    # Get the text of the selected option
+                    category_text = page_obj.locator(f"#vmr_category option[value='{category_value}']").inner_text()
+                    metadata["Category"] = category_text
+        except Exception as e:
+            print(f"      [Debug] Category extraction failed: {e}")
+        
+        print(f"      Extracted {len(metadata)} metadata fields")
+        
+        # DEBUG: Print each field and its type
+        for key, value in metadata.items():
+            print(f"        {key}: {type(value).__name__} = {value}")
+        
+        # Close the metadata panel
+        try:
+            cancel_btn = page_obj.locator("#property_cancel")
+            if cancel_btn.count() > 0 and cancel_btn.is_visible():
+                cancel_btn.click()
+                page_obj.wait_for_timeout(1000)
+                print(f"      Metadata panel closed")
+        except:
+            # Fallback: try JavaScript
+            try:
+                page_obj.evaluate("handleRightContainerAction(true, false)")
+                page_obj.wait_for_timeout(1000)
+            except:
+                pass
         
     except Exception as e:
-        print(f"    [Warning] Metadata extraction failed: {e}")
+        print(f"      [Warning] Metadata extraction failed: {e}")
+        # Try to close panel
+        try:
+            page_obj.locator("#property_cancel").click()
+            page_obj.wait_for_timeout(500)
+        except:
+            pass
     
     return metadata
-
 # -----------------------------
 # DOWNLOAD FUNCTIONS
 # -----------------------------
@@ -269,6 +382,17 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
     print(f"    Downloading: {filename}")
     
     try:
+
+        metadata = extract_file_metadata(page_obj, filename)
+
+        # SAFETY CHECK: Remove any Locator objects that might have snuck in
+        clean_metadata = {}
+        for key, value in metadata.items():
+            if str(type(value).__name__) == "Locator":
+                print(f"      [WARNING] Removing Locator object from key: {key}")
+                continue
+            clean_metadata[key] = value
+        metadata = clean_metadata
         # Wait a bit more to ensure files are visible
         page_obj.wait_for_timeout(1000)
         
@@ -299,7 +423,7 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
             return None
         
         # Extract metadata first
-        metadata = extract_file_metadata(page_obj, row)
+       
         
         # Select checkbox
         checkbox = row.locator("input[type='checkbox']")
@@ -321,7 +445,13 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
         try:
             with page_obj.expect_download(timeout=60000) as download_info:
                 dl_btn.first.click(force=True)
-                page_obj.wait_for_timeout(1000)
+                page_obj.wait_for_timeout(500)
+                
+                # Click OK button in the download confirmation modal
+                ok_btn = page_obj.locator("button[data-bb-handler='confirm'], button.btn-primary:has-text('OK')")
+                if ok_btn.count() > 0 and ok_btn.first.is_visible():
+                    ok_btn.first.click()
+                    page_obj.wait_for_timeout(500)
             
             download = download_info.value
             download.save_as(file_path)
@@ -435,7 +565,7 @@ def run_migration():
     results = []
     
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=False)
+        browser = pw.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
             accept_downloads=True,
