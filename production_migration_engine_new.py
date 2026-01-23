@@ -24,7 +24,7 @@ VMR_USERNAME = os.getenv("VRM_USER_NAME")
 VMR_PASSWORD = os.getenv("VMR_USER_PASSWORD")
 
 CONFIG_FILE = "config.json"
-OUTPUT_DIR = "vmr_downloads"
+OUTPUT_DIR = "Group or Department_old"
 METADATA_DIR = os.path.join(OUTPUT_DIR, "_metadata")
 ZIP_OUTPUT = "vmr_migration.zip"
 

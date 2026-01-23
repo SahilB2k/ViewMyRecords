@@ -21,7 +21,7 @@ def restructure_migration():
     # Physical root folder on disk that actually contains the HR tree.
     # By default we infer it from the folder that holds the manifest (e.g. "Group or Department").
     source_root = os.path.dirname(source_manifest_path)
-    target_root = rules.get("target_root", "restructured_output")
+    target_root = rules.get("target_root", "Group or Department_new")
     folders_to_skip = rules.get("folders_to_skip", [])
     skip_regex = rules.get("skip_regex", "")
     dry_run = rules.get("dry_run", True)
