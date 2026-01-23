@@ -1,0 +1,11 @@
+__pycache__
+venv
+.env
+.git
+.gitignore
+vmr_downloads
+*.zip
+*.rar
+*.7z
+Group or Department_new
+Group or Department_old

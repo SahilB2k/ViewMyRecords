@@ -1,0 +1,14 @@
+services:
+  vmr-migration:
+    build: .
+    volumes:
+      - .:/app
+    environment:
+      # Pass environment variables from host .env
+      - VMW_CORPORATE_USERID
+      - VRM_USER_NAME
+      - VMR_USER_PASSWORD
+    env_file:
+      - .env
+    # Keep container running to allow executing different scripts
+    command: tail -f /dev/null

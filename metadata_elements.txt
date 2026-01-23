@@ -1,0 +1,26 @@
+container which conatins metadata:<div class="right-side" id="rightContainer" style="height: 417px; margin-right: 0px; right: 0px; background-color: rgb(232, 240, 247); width: 320px;"><div id="indexingDiv2" style="background-color:#e8f0f7; max-height: 397px; overflow-y: auto; overflow-x: hidden;"><ul class="nav nav-tabs nav-justified"><li class="active clrchng1"><a href="#">Record Details</a></li><li><a href="#" id="activityTab" onclick="showActivityQuickView1(0)">Comments</a></li></ul><br> &nbsp; 
+
+classification:<select id="fileContentType" onchange="openDocumentProperties(16890)" style="width: 200px;"><option value="select">Select</option><option value="vmr_HRannualreviewRelated">HR - Annual Review</option><option value="vmr_HRcurrentEmploymentRelated">HR - Current Employment</option><option value="vmr_HReducationalRelated">HR - Educational</option><option value="vmr_HRexitRelated">HR - Exit Formalities</option><option value="vmr_HRpastemploymentRelated">HR - Past Employment</option><option value="vmr_HRpersonalkycRelated">HR - Personal / KYC</option><option value="vmr_HRrecruitmentRelated">HR - Recruitment</option><option value="vmr_HRstatutoryRelated">HR - Statutory</option><option value="vmr_HRverificationRelated">HR - Verification</option></select>
+
+
+doc subtype:<select enabled="" id="vmr_hrrecruitmentdropdown" style="min-width: 90%; max-width: 90%;"><option value="1. Photograph">1. Photograph</option><option value="2. Resume">2. Resume</option><option value="3. Interview Assessment">3. Interview Assessment</option><option value="4. Appointment / Offer Letter">4. Appointment / Offer Letter</option><option value="5. Induction">5. Induction</option><option value="6. Code of Conduct Book">6. Code of Conduct Book</option><option value="7. HR Policies / Service Conditions">7. HR Policies / Service Conditions</option><option value="8. Medical Records">8. Medical Records</option><option value="9. Other - Recruitment">9. Other - Recruitment</option><option value="10. Security Validation">10. Security Validation</option><option value="11. Test Paper/Answer Sheets">11. Test Paper/Answer Sheets</option><option value="12. Approval Note">12. Approval Note</option><option value="13. Confidentiality Agreement/NDA">13. Confidentiality Agreement/NDA</option><option value="14. Apperentice Contract Agreement">14. Apperentice Contract Agreement</option><option value="15. Induction Feedback form">15. Induction Feedback form</option><option value="16. Standing Orders Acknowledgement">16. Standing Orders Acknowledgement</option><option value="17. Referral Letter/Land Seller Details">17. Referral Letter/Land Seller Details</option></select>
+
+quick reference:<input type="text" id="vmr_quickref" class="form-control" name="vmr_quickref" value="mavros" style="min-width: 90%; max-width: 90%;">
+
+document date:<input type="text" id="vmr_docdate" class="form-control" name="vmr_docdate" value="Fri Jan 16 00:00:00 IST 2026" style="min-width: 90%; max-width: 90%;" placeholder="Date">
+
+expiry date:<input type="text" id="vmr_expirydate" class="form-control" name="vmr_expirydate" value="Sun Jan 16 00:00:00 IST 2028" style="min-width: 90%; max-width: 90%; border: none; font-weight: bold;" readonly="">
+
+life span:<select enabled="" id="vmr_doclifespan" style="min-width: 90%; max-width: 90%;"><option value="0">Select Duration(in Years)</option><option value="lifetime">Life Time</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="7">7</option><option value="10">10</option></select>
+
+offsite location:<input type="text" id="vmr_geotag" class="form-control" name="vmr_geotag" value="mavros_land" style="min-width: 90%; max-width: 90%;">
+
+On-premises location:<input type="text" id="vmr_offpremise" class="form-control" name="vmr_offpremise" value="mavros_park" style="min-width: 90%; max-width: 90%;">
+
+remark:<input type="text" id="vmr_remarks" class="form-control" name="vmr_remarks" value="very_bad" style="min-width: 90%; max-width: 90%;">
+
+category:<select enabled="" id="vmr_category" style="min-width: 90%; max-width: 90%;"><option value="NORM">Normal</option><option value="CONF">Confidential</option><option value="HCONF">Highly Secure</option></select>
+
+keywords:<input type="text" id="vmr_keywords" class="form-control" name="vmr_keywords" value="MDS,MIH" style="min-width: 90%; max-width: 90%;">
+
+doctype:<input type="text" id="vmr_doctype" class="form-control" name="vmr_doctype" value="pdf" style="min-width: 90%; max-width: 90%;">

@@ -565,7 +565,7 @@ def run_migration():
     results = []
     
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+        browser = pw.chromium.launch(headless=False)
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
             accept_downloads=True,

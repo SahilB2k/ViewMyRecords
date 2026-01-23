@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 absl-py==2.3.1
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.13
@@ -17,7 +18,7 @@ babel==2.17.0
 beautifulsoup4==4.13.4
 bleach==6.2.0
 blinker==1.9.0
-blis==1.3.0
+blis>=0.7.8,<1.0.0
 CacheControl==0.14.3
 cachetools==5.5.2
 catalogue==2.0.10
@@ -30,10 +31,10 @@ colorama==0.4.6
 comm==0.2.2
 comtypes==1.4.11
 confection==0.1.5
-contourpy==1.3.3
+contourpy==1.3.2
 cryptography==45.0.5
 cycler==0.12.1
-cymem==2.0.11
+cymem>=2.0.2
 dataclasses-json==0.6.7
 debugpy==1.8.14
 decorator==5.2.1
@@ -46,8 +47,6 @@ djangorestframework==3.16.1
 dnspython==2.7.0
 docutils==0.21.2
 email_validator==2.2.0
-en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl#sha256=293e9547a655b25499198ab15a525b05b9407a75f10255e405e8c3854329ab63
-en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
 executing==2.2.0
 fastapi==0.115.12
 fastapi-cli==0.0.7
@@ -60,12 +59,12 @@ fonttools==4.61.1
 fqdn==1.5.1
 frozenlist==1.7.0
 fsspec==2025.7.0
-gcloud==0.18.3
+# gcloud==0.18.3 (legacy package, conflicts with modern protobuf)
 gensim==4.3.3
 gitdb==4.0.12
 GitPython==3.1.44
-google-ai-generativelanguage==0.6.15
-google-api-core==2.25.1
+google-ai-generativelanguage>=0.6.0
+google-api-core>=2.15.0
 google-api-python-client==2.176.0
 google-auth==2.40.3
 google-auth-httplib2==0.2.0
@@ -78,7 +77,7 @@ google-resumable-media==2.7.2
 googleapis-common-protos==1.70.0
 greenlet==3.2.3
 grpcio==1.73.1
-grpcio-status==1.71.2
+grpcio-status>=1.60.0
 gunicorn==21.2.0
 h11==0.16.0
 h2==4.2.0
@@ -126,7 +125,7 @@ langchain-openai==0.3.31
 langchain-openrouter==0.0.1
 langchain-text-splitters==0.3.8
 langcodes==3.5.0
-langsmith==0.4.4
+langsmith>=0.1.0
 language_data==1.3.0
 llama_cpp_python==0.3.16
 llvmlite==0.46.0
@@ -142,7 +141,7 @@ mkl==2021.4.0
 mpmath==1.3.0
 msgpack==1.1.1
 multidict==6.6.3
-murmurhash==1.0.13
+murmurhash>=0.28.0
 mypy_extensions==1.1.0
 mysql-connector-python==9.3.0
 narwhals==1.44.0
@@ -160,7 +159,7 @@ oauth2client==4.1.3
 ollama==0.5.3
 openai==1.101.0
 orjson==3.10.18
-ortools==9.14.6206
+ortools>=9.0.0
 overrides==7.7.0
 packaging==24.2
 pandas==2.3.0
@@ -172,12 +171,12 @@ Pillow==10.0.1
 platformdirs==4.3.8
 playwright==1.57.0
 plotly==6.5.0
-preshed==3.0.10
+preshed>=3.0.2
 prometheus_client==0.22.1
 prompt_toolkit==3.0.51
 propcache==0.3.2
 proto-plus==1.26.1
-protobuf==6.31.1
+protobuf>=5.26.1,<6.0.0
 psutil==7.0.0
 psycopg==3.2.13
 psycopg-binary==3.2.13
@@ -204,7 +203,7 @@ pyparsing==3.2.3
 pypdf==6.4.0
 PyPDF2==3.0.1
 pypiwin32==223
-Pyrebase4==4.8.0
+# Pyrebase4==4.8.0 (commented out to resolve requests-toolbelt conflict with langsmith)
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.0
 python-json-logger==3.3.0
@@ -218,11 +217,11 @@ PyYAML==6.0.2
 pyzmq==26.4.0
 readme==0.7.1
 readme_renderer==44.0
-readmeai==0.6.3
+# readmeai==0.6.3 (commented out to resolve tiktoken conflict with langchain-openai)
 referencing==0.36.2
 regex==2024.11.6
 requests==2.32.4
-requests-toolbelt==1.0.0
+requests-toolbelt>=1.0.0
 rfc3339-validator==0.1.4
 rfc3986-validator==0.1.1
 rich==14.0.0
@@ -241,12 +240,12 @@ smart-open==7.1.0
 smmap==5.0.2
 sniffio==1.3.1
 soupsieve==2.7
-spacy==3.8.7
+spacy==3.7.5
 spacy-legacy==3.0.12
 spacy-loggers==1.0.5
 SQLAlchemy==2.0.41
 sqlparse==0.5.3
-srsly==2.5.1
+srsly>=2.4.0
 stack-data==0.6.3
 starlette==0.46.2
 streamlit==1.46.1
@@ -255,7 +254,7 @@ sympy==1.14.0
 tbb==2021.13.1
 tenacity==8.5.0
 terminado==0.18.1
-thinc==8.3.6
+thinc==8.2.5
 threadpoolctl==3.6.0
 tiktoken==0.11.0
 tinycss2==1.4.0

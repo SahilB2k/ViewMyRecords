@@ -1,0 +1,25 @@
+{
+    "timestamp": "2026-01-21T00:00:00",
+    "total_files": 1,
+    "files": [
+      {
+        "filename": "demo.txt",
+        "path": "vmr_test\\demo.txt",
+        "metadata": {
+          "Classification": "HR - Recruitment",
+          "Document Sub Type": "2. Resume",
+          "Quick Reference": "test one",
+          "Document Date": "21-Jan-2026",
+          "Expiry Date": "21-Jan-2028 00:00:00",
+          "Offsite Location": "test_land",
+          "On-Premises Location": "test_park",
+          "Remarks": "single-file test",
+          "Keywords": "test,vmr",
+          "Document Type": "pdf",
+          "Document SubType Internal": "2. Resume",
+          "Lifespan": "2",
+          "Category": "Confidential"
+        }
+      }
+    ]
+  }
