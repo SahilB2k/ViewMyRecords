@@ -31,9 +31,9 @@ ZIP_OUTPUT = "vmr_migration.zip"
 # Retry Configuration
 MAX_RETRIES = 3
 RETRY_DELAY = 3000  # ms - increased
-NAVIGATION_TIMEOUT = 30000  # ms - increased
-GRID_LOAD_TIMEOUT = 20000  # ms - increased
-FILE_WAIT_TIMEOUT = 5000  # ms - new: wait for files to appear
+NAVIGATION_TIMEOUT = 60000  # ms - increased to 60s
+GRID_LOAD_TIMEOUT = 60000  # ms - increased to 60s
+FILE_WAIT_TIMEOUT = 10000  # ms - increased wait for files
 
 # -----------------------------
 # SETUP
@@ -506,10 +506,29 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
         
         # Save metadata
         if metadata:
-            metadata_file = os.path.join(
-                METADATA_DIR,
-                folder_path.replace(os.sep, "_") + "_" + filename + ".json"
-            )
+            # Create metadata folder structure: METADATA_DIR / HR / Live Employee / ...
+            # folder_path is relative path of the PARENT folder of the file
+            # e.g. if file is HR/Live Employee/Doc.pdf, folder_path is HR/Live Employee
+            
+            # Wait, download_file_with_metadata is called with folder_path = relative_path
+            # AND relative_path in caller is os.path.relpath(file_path, output_base) which includes filename?
+            # recursive caller: relative_path = os.path.relpath(file_path, output_base)
+            # file_path includes filename.
+            # So folder_path includes filename throughout this function.
+            
+            # We want: METADATA_DIR / HR / Live Employee / Doc.pdf.json
+            
+            # rel_path_of_file = folder_path (which is relative path including filename)
+            # meta_full_path = os.path.join(METADATA_DIR, folder_path + ".json")
+               # Create metadata folder structure: METADATA_DIR / HR / Live Employee / ...
+            # folder_path is relative path e.g. HR/Live Employee...
+            
+            meta_rel_dir = os.path.dirname(folder_path) # Extract directory part from relative_path
+            meta_full_dir = os.path.join(METADATA_DIR, meta_rel_dir)
+            os.makedirs(meta_full_dir, exist_ok=True)
+            
+            metadata_file = os.path.join(meta_full_dir, filename + ".json")
+
             with open(metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
         
@@ -540,7 +559,14 @@ def download_folder_recursive(page_obj, current_path, output_base, results):
     print(f"  Found: {len(folders)} folders, {len(files)} files")
     
     # Create local folder structure
-    local_folder = os.path.join(output_base, *current_path[1:])  # Skip "Group or Department"
+    # Create local folder structure
+    # current_path is like ["Group or Department_old", "HR", ...]
+    # OUTPUT_DIR is "Group or Department_old"
+    # We want local path: Group or Department_old/HR...
+    # So we join OUTPUT_DIR with current_path[1:]
+    
+    relative_parts = current_path[1:]
+    local_folder = os.path.join(output_base, *relative_parts)
     os.makedirs(local_folder, exist_ok=True)
     
     # Download all files in current folder
@@ -630,7 +656,7 @@ def run_migration():
             return
         
         try:
-            click_folder(page, "Group or Department")
+            click_folder(page, "Group or Department_old")
         except Exception as e:
             print(f"✗ Failed to enter root: {e}")
             browser.close()
@@ -640,7 +666,7 @@ def run_migration():
         try:
             download_folder_recursive(
                 page,
-                ["Group or Department"],
+                ["Group or Department_old"],
                 OUTPUT_DIR,
                 results
             )

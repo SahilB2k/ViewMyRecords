@@ -3,12 +3,13 @@ import json
 import re
 import time
 import zipfile
+import shutil
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from dotenv import load_dotenv
 
 # Load environment variables from .env file (in parent directory)
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
+load_dotenv() # Load from .env in current directory (Docker/Standard)
 
 # -----------------------------
 # CREDENTIALS & CONFIG
@@ -19,16 +20,16 @@ VMR_USERNAME = os.getenv("VRM_USER_NAME")
 VMR_PASSWORD = os.getenv("VMR_USER_PASSWORD")
 
 CONFIG_FILE = "config.json"
-OUTPUT_DIR = "vmr_downloads"
+OUTPUT_DIR = "Group or Department_old"
 METADATA_DIR = os.path.join(OUTPUT_DIR, "_metadata")
 ZIP_OUTPUT = "vmr_migration.zip"
 
 # Retry Configuration
 MAX_RETRIES = 3
 RETRY_DELAY = 3000  # ms - increased
-NAVIGATION_TIMEOUT = 30000  # ms - increased
-GRID_LOAD_TIMEOUT = 20000  # ms - increased
-FILE_WAIT_TIMEOUT = 5000  # ms - new: wait for files to appear
+NAVIGATION_TIMEOUT = 60000  # ms - increased
+GRID_LOAD_TIMEOUT = 60000  # ms - increased
+FILE_WAIT_TIMEOUT = 10000  # ms - new: wait for files to appear
 
 # -----------------------------
 # SETUP
@@ -455,18 +456,60 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
             
             download = download_info.value
             download.save_as(file_path)
-            print(f"      ✓ Downloaded: {filename}")
+            
+            # AUTO-EXTRACTION LOGIC: VMR often wraps single files in ZIPs
+            if zipfile.is_zipfile(file_path):
+                print(f"      [Info] ZIP wrapping detected, extracting...")
+                temp_extract_dir = os.path.join(OUTPUT_DIR, "temp_extract_" + str(int(time.time())))
+                os.makedirs(temp_extract_dir, exist_ok=True)
+                
+                try:
+                    with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_extract_dir)
+                    
+                    # Find the most likely correct file in the extracted contents
+                    # Look for exact match first, then same extension, then just any file
+                    extracted_files = []
+                    for root, dirs, files in os.walk(temp_extract_dir):
+                        for f in files:
+                            extracted_files.append(os.path.join(root, f))
+                    
+                    if extracted_files:
+                        # Find best match
+                        best_match = extracted_files[0]
+                        for f in extracted_files:
+                            if os.path.basename(f) == filename:
+                                best_match = f
+                                break
+                        
+                        # Replace the ZIP with the actual file
+                        os.remove(file_path)
+                        shutil.move(best_match, file_path)
+                        print(f"      ✓ Extracted and saved: {filename}")
+                    else:
+                        print(f"      ✗ ZIP was empty!?")
+                        
+                finally:
+                    # Clean up temp directory
+                    if os.path.exists(temp_extract_dir):
+                        shutil.rmtree(temp_extract_dir)
+            else:
+                print(f"      ✓ Downloaded: {filename}")
             
         except Exception as e:
             print(f"      ✗ Download failed: {e}")
             return None
         
         # Save metadata
-        if metadata:
-            metadata_file = os.path.join(
-                METADATA_DIR,
-                folder_path.replace(os.sep, "_") + "_" + filename + ".json"
-            )
+            # Create metadata folder structure: METADATA_DIR / HR / Live Employee / ...
+            # folder_path is relative path e.g. HR/Live Employee...
+            
+            meta_rel_dir = os.path.dirname(folder_path) # Extract directory part from relative_path
+            meta_full_dir = os.path.join(METADATA_DIR, meta_rel_dir)
+            os.makedirs(meta_full_dir, exist_ok=True)
+            
+            metadata_file = os.path.join(meta_full_dir, filename + ".json")
+
             with open(metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
         
@@ -497,7 +540,13 @@ def download_folder_recursive(page_obj, current_path, output_base, results):
     print(f"  Found: {len(folders)} folders, {len(files)} files")
     
     # Create local folder structure
-    local_folder = os.path.join(output_base, *current_path[1:])  # Skip "Group or Department"
+    # current_path is like ["Group or Department_old", "HR", ...]
+    # OUTPUT_DIR is "Group or Department_old"
+    # We want local path: Group or Department_old/HR...
+    # So we join OUTPUT_DIR with current_path[1:] (skipping root)
+    
+    relative_parts = current_path[1:]
+    local_folder = os.path.join(output_base, *relative_parts)
     os.makedirs(local_folder, exist_ok=True)
     
     # Download all files in current folder
@@ -508,6 +557,8 @@ def download_folder_recursive(page_obj, current_path, output_base, results):
                 continue
             
             file_path = os.path.join(local_folder, filename)
+            # relative_path passed to metadata function should allow reconstructing structure
+            # relative_path = relative path from OUTPUT_DIR
             relative_path = os.path.relpath(file_path, output_base)
             
             result = download_file_with_metadata(page_obj, filename, file_path, relative_path)
@@ -565,7 +616,7 @@ def run_migration():
     results = []
     
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=False)
+        browser = pw.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
             accept_downloads=True,
@@ -587,7 +638,7 @@ def run_migration():
             return
         
         try:
-            click_folder(page, "Group or Department")
+            click_folder(page, "Group or Department_old")
         except Exception as e:
             print(f"✗ Failed to enter root: {e}")
             browser.close()
@@ -597,7 +648,7 @@ def run_migration():
         try:
             download_folder_recursive(
                 page,
-                ["Group or Department"],
+                ["Group or Department_old"],
                 OUTPUT_DIR,
                 results
             )

@@ -3,6 +3,7 @@ import json
 import re
 import shutil
 import csv
+import zipfile
 
 def restructure_migration():
     """Restructure the migrated data into a cleaner business hierarchy."""
@@ -56,7 +57,8 @@ def restructure_migration():
         #   2) Use that HR-onwards segment both for:
         #        - locating the source file under source_root
         #        - building the new relative structure under target_root
-        parts = old_path.split(os.sep)
+        # Normalize path separators to handle Windows paths in Linux environment
+        parts = old_path.replace("\\", "/").split("/")
         try:
             # Find the index of the first folder after the manifest's base directory
             # In this case, we know the structure usually starts with HR
@@ -104,8 +106,52 @@ def restructure_migration():
             # so that it matches the actual disk layout
             source_full_path = os.path.join(os.getcwd(), source_root, *clean_parts)
             if os.path.exists(source_full_path):
-                shutil.copy2(source_full_path, new_full_path)
-                print(f"  [Success] Copied successfully")
+                # Check if the source file is actually a ZIP (VMR wraps single files in ZIPs sometimes)
+                if zipfile.is_zipfile(source_full_path):
+                    print(f"  [Info] ZIP wrapper detected for source: {source_full_path}")
+                    try:
+                        # Extract to a temp folder to find the real file
+                        temp_extract_dir = os.path.join(os.path.dirname(new_full_path), "_temp_" + filename)
+                        os.makedirs(temp_extract_dir, exist_ok=True)
+                        
+                        with zipfile.ZipFile(source_full_path, 'r') as zip_ref:
+                            zip_ref.extractall(temp_extract_dir)
+                        
+                        # Find the actual file inside
+                        extracted_files = []
+                        for root, dirs, files in os.walk(temp_extract_dir):
+                            for f in files:
+                                extracted_files.append(os.path.join(root, f))
+                        
+                        best_match = None
+                        if not extracted_files:
+                            print(f"  [Warning] ZIP was empty, copying original file.")
+                            shutil.copy2(source_full_path, new_full_path)
+                        else:
+                            # Heuristic: Find file with same name, else use the largest file
+                            for f in extracted_files:
+                                if os.path.basename(f) == filename:
+                                    best_match = f
+                                    break
+                            
+                            if not best_match:
+                                # Fallback to largest file if exact name not found
+                                best_match = max(extracted_files, key=os.path.getsize)
+                            
+                            print(f"  [Info] Extracted inner file: {os.path.basename(best_match)}")
+                            shutil.copy2(best_match, new_full_path)
+                            
+                        # Cleanup
+                        shutil.rmtree(temp_extract_dir, ignore_errors=True)
+                        print(f"  [Success] Copied successfully (unzipped)")
+                        
+                    except Exception as e:
+                        print(f"  [Error] Failed to extract ZIP: {e}. Copying original.")
+                        shutil.copy2(source_full_path, new_full_path)
+                else:
+                    # Normal file copy
+                    shutil.copy2(source_full_path, new_full_path)
+                    print(f"  [Success] Copied successfully")
             else:
                 print(f"  [Error] Source file missing: {source_full_path}")
                 continue
