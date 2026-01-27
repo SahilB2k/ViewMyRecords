@@ -551,16 +551,39 @@ def fill_metadata(page, metadata, filename):
                 except:
                     pass
                 
+                # Validation: Wait for panel to disappear
                 try:
-                    page.wait_for_selector("#property_save", state="hidden", timeout=10000)
+                    page.wait_for_selector("#rightContainer", state="hidden", timeout=10000)
+                    return True
                 except:
-                    page.wait_for_timeout(2000)
-                
-                return True
+                    # If panel still exists, try to find an error message
+                    error_selectors = [
+                        ".bootbox-body",                # Common for popups
+                        ".alert-danger",                # Bootstrap style
+                        ".error-text",                  # General
+                        "#property_error_msg",          # Specific ID
+                        "span[style*='color: red']",    # Inline style errors
+                        "div[class*='error']"           # Class-based errors
+                    ]
+                    
+                    error_found = "Unknown error - Panel did not close"
+                    for selector in error_selectors:
+                        try:
+                            msg_element = page.locator(selector).first
+                            if msg_element.is_visible(timeout=500):
+                                error_found = msg_element.inner_text().strip()
+                                break
+                        except:
+                            continue
+                    
+                    log(f"✗ Save failed for '{filename}': {error_found}", "ERROR")
+                    return False
             else:
+                log(f"✗ Save button not visible for '{filename}'", "ERROR")
                 return False
         else:
-            return False
+            # No changes to save, consider it a success as the state is already correct
+            return True
         
     except Exception as e:
         log(f"Error filling metadata: {e}", "ERROR")
@@ -569,6 +592,10 @@ def fill_metadata(page, metadata, filename):
 # --- MAIN PROCESSING ---
 def process_single_file(page, filename, metadata, path_list):
     """Process a single file - navigate, find, and update metadata"""
+    # Defensive check: ensure metadata is always a dictionary
+    if metadata is None:
+        metadata = {}
+        
     try:
         if not navigate_to_path(page, path_list):
             return False

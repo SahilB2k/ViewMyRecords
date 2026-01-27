@@ -23,6 +23,7 @@ def restructure_migration():
     # By default we infer it from the folder that holds the manifest (e.g. "Group or Department").
     source_root = os.path.dirname(source_manifest_path)
     target_root = rules.get("target_root", "Group or Department_new")
+    anchor = rules.get("hierarchy_anchor", "HR")
     folders_to_skip = rules.get("folders_to_skip", [])
     skip_regex = rules.get("skip_regex", "")
     dry_run = rules.get("dry_run", True)
@@ -61,11 +62,11 @@ def restructure_migration():
         parts = old_path.replace("\\", "/").split("/")
         try:
             # Find the index of the first folder after the manifest's base directory
-            # In this case, we know the structure usually starts with HR
-            index = parts.index("HR")
+            # Using dynamic anchor from config
+            index = parts.index(anchor)
             clean_parts = parts[index:]
         except ValueError:
-            print(f"  [Warning] Could not find 'HR' in path: {old_path}")
+            print(f"  [Warning] Could not find anchor '{anchor}' in path: {old_path}")
             continue
             
         # Apply transformation rules
@@ -89,67 +90,85 @@ def restructure_migration():
             if not is_skipped:
                 new_relative_parts.append(part)
             
-        new_relative_path = os.path.join(target_root, *new_relative_parts, filename)
-        new_full_path = os.path.join(os.getcwd(), new_relative_path)
+        # Prepare unique local filename to prevent overwrites
+        target_dir = os.path.join(os.getcwd(), target_root, *new_relative_parts)
+        if not dry_run:
+            os.makedirs(target_dir, exist_ok=True)
+            
+        # Function to find next available filename
+        def get_unique_name(dest_dir, fname):
+            base, ext = os.path.splitext(fname)
+            counter = 0
+            while True:
+                suffix = f" ({counter})" if counter > 0 else ""
+                candidate = f"{base}{suffix}{ext}"
+                if not os.path.exists(os.path.join(dest_dir, candidate)):
+                    return candidate
+                counter += 1
+
+        target_filename = filename
+        if not dry_run:
+            target_filename = get_unique_name(target_dir, filename)
+            
+        new_relative_path = os.path.join(target_root, *new_relative_parts, target_filename)
+        new_full_path = os.path.join(target_dir, target_filename)
         
         print(f"\nProcessing: {filename}")
+        if target_filename != filename:
+            print(f"  [Info] Renamed to: {target_filename} due to collision")
         print(f"  Old: {old_path}")
         print(f"  New: {new_relative_path}")
         
         if not dry_run:
-            # Ensure target directory exists
-            os.makedirs(os.path.dirname(new_full_path), exist_ok=True)
-            
-            # Copy file (using copy2 to preserve timestamps)
-            # We intentionally build the source path from:
-            #   CWD / source_root / HR\...\filename
-            # so that it matches the actual disk layout
             source_full_path = os.path.join(os.getcwd(), source_root, *clean_parts)
+            
+            # Resumability check: Skip if file exists and matches size (optional but recommended)
+            if os.path.exists(new_full_path) and os.path.exists(source_full_path):
+                if os.path.getsize(new_full_path) == os.path.getsize(source_full_path):
+                    print(f"  [Info] File already exists and matches size. Skipping copy.")
+                    restructured_files.append({
+                        "filename": target_filename,
+                        "old_path": old_path,
+                        "new_path": new_relative_path,
+                        "metadata": metadata
+                    })
+                    continue
+
             if os.path.exists(source_full_path):
-                # Check if the source file is actually a ZIP (VMR wraps single files in ZIPs sometimes)
+                # Check for ZIP wrapper
                 if zipfile.is_zipfile(source_full_path):
                     print(f"  [Info] ZIP wrapper detected for source: {source_full_path}")
                     try:
-                        # Extract to a temp folder to find the real file
-                        temp_extract_dir = os.path.join(os.path.dirname(new_full_path), "_temp_" + filename)
+                        temp_extract_dir = os.path.join(os.path.dirname(new_full_path), "_temp_" + target_filename)
                         os.makedirs(temp_extract_dir, exist_ok=True)
-                        
                         with zipfile.ZipFile(source_full_path, 'r') as zip_ref:
                             zip_ref.extractall(temp_extract_dir)
                         
-                        # Find the actual file inside
                         extracted_files = []
                         for root, dirs, files in os.walk(temp_extract_dir):
                             for f in files:
                                 extracted_files.append(os.path.join(root, f))
                         
                         best_match = None
-                        if not extracted_files:
-                            print(f"  [Warning] ZIP was empty, copying original file.")
-                            shutil.copy2(source_full_path, new_full_path)
-                        else:
-                            # Heuristic: Find file with same name, else use the largest file
+                        if extracted_files:
                             for f in extracted_files:
                                 if os.path.basename(f) == filename:
                                     best_match = f
                                     break
-                            
                             if not best_match:
-                                # Fallback to largest file if exact name not found
                                 best_match = max(extracted_files, key=os.path.getsize)
                             
-                            print(f"  [Info] Extracted inner file: {os.path.basename(best_match)}")
                             shutil.copy2(best_match, new_full_path)
-                            
-                        # Cleanup
-                        shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                        print(f"  [Success] Copied successfully (unzipped)")
+                            print(f"  [Success] Extracted and copied")
+                        else:
+                            shutil.copy2(source_full_path, new_full_path)
+                            print(f"  [Warning] ZIP empty, copied original")
                         
+                        shutil.rmtree(temp_extract_dir, ignore_errors=True)
                     except Exception as e:
-                        print(f"  [Error] Failed to extract ZIP: {e}. Copying original.")
+                        print(f"  [Error] ZIP extraction failed: {e}. Copying original.")
                         shutil.copy2(source_full_path, new_full_path)
                 else:
-                    # Normal file copy
                     shutil.copy2(source_full_path, new_full_path)
                     print(f"  [Success] Copied successfully")
             else:
@@ -157,7 +176,7 @@ def restructure_migration():
                 continue
         
         restructured_files.append({
-            "filename": filename,
+            "filename": target_filename,
             "old_path": old_path,
             "new_path": new_relative_path,
             "metadata": metadata
@@ -173,7 +192,8 @@ def restructure_migration():
     
     csv_rows = []
     for entry in restructured_files:
-        meta = entry["metadata"]
+        # Handle case where metadata might be None/Null
+        meta = entry["metadata"] or {}
         row = {
             "File Name": entry["filename"],
             "Classification": meta.get("Classification", ""),

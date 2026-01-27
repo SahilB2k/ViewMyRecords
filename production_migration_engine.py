@@ -48,6 +48,67 @@ CONFIG = load_config()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(METADATA_DIR, exist_ok=True)
 
+class ManifestLogger:
+    """Helper to log migration results incrementally to disk to save memory."""
+    def __init__(self, output_dir):
+        self.log_file = os.path.join(output_dir, "results.jsonl")
+        # Clear existing log if any
+        if os.path.exists(self.log_file):
+            os.remove(self.log_file)
+            
+    def log(self, entry):
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            
+    def get_all_results(self):
+        results = []
+        if os.path.exists(self.log_file):
+            with open(self.log_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        results.append(json.loads(line))
+        return results
+
+def sanitize_filename(filename):
+    """Sanitize filename to be OS-safe."""
+    # Replace illegal characters
+    name = re.sub(r'[\\/*?:"<>|]', "_", filename)
+    # Trim and remove trailing dots or spaces
+    name = name.strip().rstrip(". ")
+    if not name:
+        name = "unnamed_file_" + str(int(time.time()))
+    return name
+
+def get_unique_local_path(directory, filename):
+    """Generate a unique local path to avoid overwriting files, case-insensitively."""
+    base_name = sanitize_filename(filename)
+    name, ext = os.path.splitext(base_name)
+    
+    # Path length safeguard (Windows limit is 260)
+    # 240 is a safe threshold to account for deep directory hierarchy
+    if len(os.path.join(directory, base_name)) > 240:
+        print(f"      [Warning] Path too long, truncating filename...")
+        name = name[:(240 - len(directory) - len(ext) - 10)] # leave room for extension and counter
+        base_name = name + ext
+
+    counter = 0
+    while True:
+        suffix = f" ({counter})" if counter > 0 else ""
+        candidate = f"{name}{suffix}{ext}"
+        full_path = os.path.join(directory, candidate)
+        
+        # Check if any file exists in directory that matches candidate case-insensitively
+        exists = False
+        if os.path.exists(directory):
+            for existing_item in os.listdir(directory):
+                if existing_item.lower() == candidate.lower():
+                    exists = True
+                    break
+        
+        if not exists:
+            return full_path
+        counter += 1
+
 # -----------------------------
 # AUTHENTICATION
 # -----------------------------
@@ -115,6 +176,29 @@ def login_to_vmr(page_obj):
     print("✗ Login failed after all retries")
     return False
 
+def ensure_logged_in(page_obj):
+    """Verifies session and re-logs in if necessary."""
+    try:
+        # Check if we're still on a page with the VMR grid or mailbox
+        if page_obj.locator("span.mail-sender").count() > 0:
+            return True
+        
+        # If we see login fields, we've been logged out
+        if page_obj.locator("input[name='corpPassword']").count() > 0:
+            print("  [Session] Session expired, re-logging in...")
+            return login_to_vmr(page_obj)
+            
+        # Try to handle conflict and check again
+        handle_session_conflict(page_obj)
+        if page_obj.locator("span.mail-sender").count() > 0:
+            return True
+            
+        # Catch-all: Re-navigate and login
+        print("  [Session] Verification failed, attempting recovery...")
+        return login_to_vmr(page_obj)
+    except:
+        return login_to_vmr(page_obj)
+
 # -----------------------------
 # GRID HELPERS
 # -----------------------------
@@ -137,9 +221,10 @@ def wait_for_grid(page_obj, timeout=GRID_LOAD_TIMEOUT):
         return False
 
 def get_grid_items(page_obj):
-    """Get all folders and files from current grid view."""
+    """Get all folders and files from current grid view with counts for duplicates."""
     folders = []
     files = []
+    file_counts = {}
     
     all_spans = page_obj.locator("span.mail-sender").all()
     
@@ -155,15 +240,52 @@ def get_grid_items(page_obj):
             if "getFolderandFileList" in onclick:
                 folders.append(txt)
             else:
-                files.append(txt)
+                # Track occurrence for duplicate filenames in the grid
+                occurrence = file_counts.get(txt, 0)
+                files.append((txt, occurrence))
+                file_counts[txt] = occurrence + 1
         except:
             continue
     
     return folders, files
 
-# -----------------------------
-# NAVIGATION
-# -----------------------------
+def get_total_pages(page_obj):
+    """Detect total pages in the current grid."""
+    try:
+        # Check for pagination text like "Page 1 of 5" or just find max page link
+        pagination_text = page_obj.locator(".pagination-info, .grid-pagination").inner_text()
+        match = re.search(r"of\s+(\d+)", pagination_text)
+        if match:
+            return int(match.group(1))
+        
+        # Fallback: check manual page buttons
+        page_buttons = page_obj.locator("a[onclick*='gotoPage']").all()
+        max_page = 1
+        for btn in page_buttons:
+            btn_text = btn.inner_text().strip()
+            if btn_text.isdigit():
+                max_page = max(max_page, int(btn_text))
+        return max_page
+    except:
+        return 1
+
+def navigate_to_page(page_obj, page_num):
+    """Navigate to a specific page of the grid."""
+    if page_num == 1:
+        return True
+    
+    try:
+        page_btn = page_obj.locator(f"a[onclick*='gotoPage({page_num})']").or_(
+            page_obj.locator(f"a:has-text('{page_num}')")
+        )
+        if page_btn.count() > 0:
+            page_btn.first.click()
+            page_obj.wait_for_timeout(2000)
+            wait_for_grid(page_obj)
+            return True
+    except:
+        pass
+    return False
 def click_folder(page_obj, folder_name):
     """Clicks a folder in the SPA."""
     handle_session_conflict(page_obj)
@@ -207,48 +329,19 @@ def navigate_to_path(page_obj, path_list):
 # -----------------------------
 # METADATA EXTRACTION
 # -----------------------------
-def extract_file_metadata(page_obj, filename):
-    """Extract metadata from file info dialog by finding the file in the grid."""
+def extract_file_metadata(page_obj, row_locator, filename):
+    """Extract metadata from file info dialog using the provided row locator."""
     metadata = {}
     
     try:
         print(f"      Extracting metadata...")
         
-        # Find the file by filename in the grid
-        file_span = page_obj.locator("span.mail-sender").filter(has_text=filename)
+        # Strategy 1: Look for info button inside the row
+        info_anchor = row_locator.locator("a[onclick*='showRecordIndexingView']")
         
-        if file_span.count() == 0:
-            print(f"      [Warning] Could not locate file in grid: {filename}")
-            return metadata
-        
-        # Try multiple strategies to find the parent container with the info button
-        info_anchor = None
-        
-        # Strategy 1: Look for parent li with class 'pdli '
-        parent_li = file_span.first.locator("xpath=ancestor::li[@class='pdli ']")
-        if parent_li.count() > 0:
-            info_anchor = parent_li.locator("a[onclick*='showRecordIndexingView']")
-        
-        # Strategy 2: Look for parent li without specific class
-        if not info_anchor or info_anchor.count() == 0:
-            parent_li = file_span.first.locator("xpath=ancestor::li")
-            if parent_li.count() > 0:
-                info_anchor = parent_li.first.locator("a[onclick*='showRecordIndexingView']")
-        
-        # Strategy 3: Look in parent tr (table row)
-        if not info_anchor or info_anchor.count() == 0:
-            parent_tr = file_span.first.locator("xpath=ancestor::tr")
-            if parent_tr.count() > 0:
-                info_anchor = parent_tr.first.locator("a[onclick*='showRecordIndexingView']")
-        
-        # Strategy 4: Search nearby in the DOM
-        if not info_anchor or info_anchor.count() == 0:
-            # Look for any info button in the same row/container
-            info_anchor = page_obj.locator("a[onclick*='showRecordIndexingView']").filter(has_text="")
-        
-        if not info_anchor or info_anchor.count() == 0:
-            print(f"      [Warning] Info button not found for file")
-            return metadata
+        if info_anchor.count() == 0:
+            print(f"      [Warning] Info button not found in row for {filename}")
+            return None # Return None instead of {}
         
         # Click the first matching info button
         print(f"      [DEBUG] Clicking info button...")
@@ -259,92 +352,53 @@ def extract_file_metadata(page_obj, filename):
         panel = page_obj.locator("#indexingDiv2")
         if panel.count() == 0 or not panel.is_visible():
             print(f"      [Warning] Metadata panel did not appear")
-            return metadata
+            return None # Return None instead of {}
         
         print(f"      Metadata panel opened successfully")
         
-        # Extract Classification
+        # Dynamic Extraction: All inputs and selects in the panel
         try:
-            selected_option = page_obj.locator("#fileContentType option[selected]")
-            if selected_option.count() == 0:
-                # Try to get the currently selected value
-                selected_value = page_obj.locator("#fileContentType").evaluate("el => el.value")
-                if selected_value and selected_value != "select":
-                    selected_text = page_obj.locator(f"#fileContentType option[value='{selected_value}']").inner_text()
-                    metadata["Classification"] = selected_text
-            else:
-                classification = selected_option.inner_text()
-                if classification != "Select":
-                    metadata["Classification"] = classification
-        except Exception as e:
-            print(f"      [Debug] Classification extraction failed: {e}")
-        
-        # Extract Document Sub Type - try multiple dropdown IDs
-        try:
-            dropdown_ids = [
-                "#vmr_hrrecruitmentdropdown",
-                "#vmr_hrannualreviewdropdown", 
-                "#vmr_hrcurrentemploymentdropdown",
-                "#vmr_hreducationaldropdown",
-                "#vmr_hrexitdropdown",
-                "#vmr_hrpastemploymentdropdown",
-                "#vmr_hrpersonalkycdropdown",
-                "#vmr_hrstatutorydropdown",
-                "#vmr_hrverificationdropdown"
-            ]
+            # Mapping of friendly names (if we can find them via labels) or IDs
+            # For VMR, we'll try to get the 'id' of the elements
+            inputs = page_obj.locator("#indexingDiv2 input, #indexingDiv2 select").all()
             
-            for dropdown_id in dropdown_ids:
-                if page_obj.locator(dropdown_id).count() > 0:
-                    selected_val = page_obj.locator(dropdown_id).evaluate("el => el.value")
-                    if selected_val:
-                        metadata["Document Sub Type"] = selected_val
-                        break
-        except Exception as e:
-            print(f"      [Debug] Document Sub Type extraction failed: {e}")
-        
-        # Extract input field values
-        field_mappings = {
-            "Quick Reference": "#vmr_quickref",
-            "Document Date": "#vmr_docdate",
-            "Expiry Date": "#vmr_expirydate",
-            "Offsite Location": "#vmr_geotag",
-            "On-Premises Location": "#vmr_offpremise",
-            "Remarks": "#vmr_remarks",
-            "Keywords": "#vmr_keywords",
-            "Document Type": "#vmr_doctype",
-            "Document SubType Internal": "#vmr_docsubtype"
-        }
-        
-        for field_name, selector in field_mappings.items():
-            try:
-                if page_obj.locator(selector).count() > 0:
-                    value = page_obj.locator(selector).input_value()
+            for element in inputs:
+                try:
+                    element_id = element.get_attribute("id")
+                    if not element_id or element_id in ["property_save", "property_cancel"]:
+                        continue
+                    
+                    tag_name = element.evaluate("el => el.tagName")
+                    
+                    if tag_name == "SELECT":
+                        # Get selected text if possible, else value
+                        try:
+                            value = element.evaluate("el => el.options[el.selectedIndex].text")
+                            if value == "Select":
+                                value = ""
+                        except:
+                            value = element.evaluate("el => el.value")
+                    else:
+                        value = element.input_value()
+                    
                     if value and value.strip():
-                        metadata[field_name] = value.strip()
-            except Exception as e:
-                print(f"      [Debug] {field_name} extraction failed: {e}")
-        
-        # Extract Lifespan
-        try:
-            if page_obj.locator("#vmr_doclifespan").count() > 0:
-                lifespan_value = page_obj.locator("#vmr_doclifespan").evaluate("el => el.value")
-                if lifespan_value and lifespan_value != "0":
-                    metadata["Lifespan"] = lifespan_value
+                        # Map IDs back to a readable name if possible, else just use the ID
+                        friendly_name = element_id.replace("vmr_", "").replace("_", " ").title()
+                        metadata[friendly_name] = value.strip()
+                        
+                        # Special Case: Track the exact ID for the manifest v2
+                        metadata[f"_id_{element_id}"] = value.strip()
+                    else:
+                        # Return explicit None (Null) for empty fields
+                        friendly_name = element_id.replace("vmr_", "").replace("_", " ").title()
+                        metadata[friendly_name] = None
+                        metadata[f"_id_{element_id}"] = None
+                except:
+                    continue
         except Exception as e:
-            print(f"      [Debug] Lifespan extraction failed: {e}")
-        
-        # Extract Category
-        try:
-            if page_obj.locator("#vmr_category").count() > 0:
-                category_value = page_obj.locator("#vmr_category").evaluate("el => el.value")
-                if category_value:
-                    # Get the text of the selected option
-                    category_text = page_obj.locator(f"#vmr_category option[value='{category_value}']").inner_text()
-                    metadata["Category"] = category_text
-        except Exception as e:
-            print(f"      [Debug] Category extraction failed: {e}")
-        
-        print(f"      Extracted {len(metadata)} metadata fields")
+            print(f"      [Debug] Dynamic metadata extraction failed: {e}")
+            
+        print(f"      Extracted {len(metadata)} metadata fields (dynamic)")
         
         # DEBUG: Print each field and its type
         for key, value in metadata.items():
@@ -373,86 +427,86 @@ def extract_file_metadata(page_obj, filename):
             page_obj.wait_for_timeout(500)
         except:
             pass
+        return None # Return None on exception
     
-    return metadata
+    return metadata if metadata else None # Return None if nothing extracted
 # -----------------------------
 # DOWNLOAD FUNCTIONS
 # -----------------------------
-def download_file_with_metadata(page_obj, filename, file_path, folder_path):
-    """Download a single file and its metadata."""
-    print(f"    Downloading: {filename}")
+def download_file_with_metadata(page_obj, filename, occurrence, directory_path, folder_rel_path):
+    """Download a single file and its metadata, handling remote duplicates."""
+    # 1. Determine local path uniquely
+    file_path = get_unique_local_path(directory_path, filename)
+    safe_filename = os.path.basename(file_path)
+    
+    if safe_filename != filename:
+        print(f"    Target: {filename} (Index: {occurrence}) -> Local: {safe_filename}")
+    else:
+        print(f"    Downloading: {filename} (Index: {occurrence})")
     
     try:
-
-        metadata = extract_file_metadata(page_obj, filename)
-
-        # SAFETY CHECK: Remove any Locator objects that might have snuck in
-        clean_metadata = {}
-        for key, value in metadata.items():
-            if str(type(value).__name__) == "Locator":
-                print(f"      [WARNING] Removing Locator object from key: {key}")
-                continue
-            clean_metadata[key] = value
-        metadata = clean_metadata
-        # Wait a bit more to ensure files are visible
-        page_obj.wait_for_timeout(1000)
-        
-        # Find file row - multiple strategies
+        # Find file row - using index (occurrence) for identical names
         row = None
         
-        # Strategy 1: Exact text match
-        row_locator = page_obj.locator("tr").filter(has_text=filename)
-        if row_locator.count() > 0:
-            row = row_locator.first
-        
-        # Strategy 2: Partial match
-        if not row:
-            row_locator = page_obj.locator("tr").filter(has_text=re.compile(re.escape(filename[:20]), re.I))
-            if row_locator.count() > 0:
-                row = row_locator.first
-        
-        # Strategy 3: Find via span and get parent row
-        if not row:
-            span = page_obj.locator("span.mail-sender").filter(has_text=filename)
-            if span.count() > 0:
-                row = span.first.locator("xpath=ancestor::tr")
-                if row.count() > 0:
-                    row = row.first
+        # Strategy 1: nth locator for the specific occurrence
+        rows = page_obj.locator("tr").filter(has_text=filename)
+        if rows.count() > occurrence:
+            row = rows.nth(occurrence)
         
         if not row:
-            print(f"      ✗ File not visible in grid: {filename}")
-            return None
+            # Strategy 2: Fallback to all spans if row filtering is weird
+            spans = page_obj.locator("span.mail-sender").filter(has_text=filename)
+            match_index = 0
+            for i in range(spans.count()):
+                s = spans.nth(i)
+                if s.inner_text().strip() == filename:
+                    if match_index == occurrence:
+                        row = s.locator("xpath=ancestor::tr").first if s.locator("xpath=ancestor::tr").count() > 0 else s.locator("xpath=ancestor::li").first
+                        break
+                    match_index += 1
         
-        # Extract metadata first
-       
+        if not row:
+            print(f"      ✗ File instance {occurrence} not found in grid: {filename}")
+            return {
+                "filename": filename,
+                "occurrence": occurrence,
+                "status": "failed",
+                "error": "Not found in grid",
+                "metadata": None
+            }
+
+        # Extract metadata USING THE ROW LOCATOR
+        metadata = extract_file_metadata(page_obj, row, filename)
         
         # Select checkbox
         checkbox = row.locator("input[type='checkbox']")
         if checkbox.count() > 0:
             checkbox.first.check()
-            page_obj.wait_for_timeout(2000)  # Wait for toolbar to enable
+            page_obj.wait_for_timeout(2000)
         
         # Find and click download button
         dl_btn = page_obj.locator("a#multipleFile_download")
-        
         if dl_btn.count() == 0 or not dl_btn.first.is_visible():
             dl_btn = page_obj.locator("i.fa-download.mutiplefiledownloadiconclr").locator("xpath=ancestor::a")
         
         if dl_btn.count() == 0:
             print(f"      ✗ Download button not found")
-            return None
+            return {
+                "filename": filename,
+                "occurrence": occurrence,
+                "status": "failed",
+                "error": "Download button missing",
+                "metadata": metadata
+            }
         
         # Download file
         try:
             with page_obj.expect_download(timeout=60000) as download_info:
                 dl_btn.first.click(force=True)
                 page_obj.wait_for_timeout(500)
-                
-                # Click OK button in the download confirmation modal
                 ok_btn = page_obj.locator("button[data-bb-handler='confirm'], button.btn-primary:has-text('OK')")
                 if ok_btn.count() > 0 and ok_btn.first.is_visible():
                     ok_btn.first.click()
-                    page_obj.wait_for_timeout(500)
             
             download = download_info.value
             download.save_as(file_path)
@@ -462,35 +516,23 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
                 print(f"      [Info] ZIP wrapping detected, extracting...")
                 temp_extract_dir = os.path.join(OUTPUT_DIR, "temp_extract_" + str(int(time.time())))
                 os.makedirs(temp_extract_dir, exist_ok=True)
-                
                 try:
                     with zipfile.ZipFile(file_path, 'r') as zip_ref:
                         zip_ref.extractall(temp_extract_dir)
-                    
-                    # Find the most likely correct file in the extracted contents
-                    # Look for exact match first, then same extension, then just any file
                     extracted_files = []
                     for root, dirs, files in os.walk(temp_extract_dir):
                         for f in files:
                             extracted_files.append(os.path.join(root, f))
-                    
                     if extracted_files:
-                        # Find best match
                         best_match = extracted_files[0]
                         for f in extracted_files:
                             if os.path.basename(f) == filename:
                                 best_match = f
                                 break
-                        
-                        # Replace the ZIP with the actual file
                         os.remove(file_path)
                         shutil.move(best_match, file_path)
-                        print(f"      ✓ Extracted and saved: {filename}")
-                    else:
-                        print(f"      ✗ ZIP was empty!?")
-                        
+                        print(f"      ✓ Extracted: {filename}")
                 finally:
-                    # Clean up temp directory
                     if os.path.exists(temp_extract_dir):
                         shutil.rmtree(temp_extract_dir)
             else:
@@ -498,25 +540,26 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
             
         except Exception as e:
             print(f"      ✗ Download failed: {e}")
-            return None
+            return {
+                "filename": filename,
+                "occurrence": occurrence,
+                "status": "failed",
+                "error": str(e),
+                "metadata": metadata
+            }
         
-        # Save metadata
-            # Create metadata folder structure: METADATA_DIR / HR / Live Employee / ...
-            # folder_path is relative path e.g. HR/Live Employee...
-            
-            meta_rel_dir = os.path.dirname(folder_path) # Extract directory part from relative_path
+        # Save metadata to disk
+        if metadata:
+            meta_rel_dir = os.path.dirname(folder_rel_path)
             meta_full_dir = os.path.join(METADATA_DIR, meta_rel_dir)
             os.makedirs(meta_full_dir, exist_ok=True)
-            
             metadata_file = os.path.join(meta_full_dir, filename + ".json")
-
             with open(metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
         
-        # Uncheck to prepare for next file
+        # Uncheck
         if checkbox.count() > 0:
             checkbox.first.uncheck()
-            page_obj.wait_for_timeout(500)
         
         return {
             "filename": filename,
@@ -526,52 +569,80 @@ def download_file_with_metadata(page_obj, filename, file_path, folder_path):
         }
         
     except Exception as e:
-        print(f"      ✗ Error downloading {filename}: {e}")
-        return None
+        print(f"      ✗ Error processing {filename}: {e}")
+        return {
+            "filename": filename,
+            "occurrence": occurrence,
+            "status": "failed",
+            "error": str(e),
+            "metadata": None
+        }
 
-def download_folder_recursive(page_obj, current_path, output_base, results):
-    """Recursively download all files in a folder and its subfolders."""
+def download_folder_recursive(page_obj, current_path, output_base, manifest_logger):
+    """Recursively download all files in a folder and its subfolders with pagination support."""
+    
+    # Session recovery check
+    ensure_logged_in(page_obj)
     
     path_str = " > ".join(current_path)
     print(f"\n[Processing] {path_str}")
     
-    # Get current folder contents
-    folders, files = get_grid_items(page_obj)
-    print(f"  Found: {len(folders)} folders, {len(files)} files")
-    
-    # Create local folder structure
-    # current_path is like ["Group or Department_old", "HR", ...]
-    # OUTPUT_DIR is "Group or Department_old"
-    # We want local path: Group or Department_old/HR...
-    # So we join OUTPUT_DIR with current_path[1:] (skipping root)
+    total_pages = get_total_pages(page_obj)
+    if total_pages > 1:
+        print(f"  [Info] Folder has {total_pages} pages")
     
     relative_parts = current_path[1:]
     local_folder = os.path.join(output_base, *relative_parts)
     os.makedirs(local_folder, exist_ok=True)
     
-    # Download all files in current folder
-    if files:
-        print(f"  Downloading {len(files)} files...")
-        for filename in files:
-            if filename in ["My Records", "My Activity", "Group or Department"]:
-                continue
-            
-            file_path = os.path.join(local_folder, filename)
-            # relative_path passed to metadata function should allow reconstructing structure
-            # relative_path = relative path from OUTPUT_DIR
-            relative_path = os.path.relpath(file_path, output_base)
-            
-            result = download_file_with_metadata(page_obj, filename, file_path, relative_path)
-            if result:
-                results.append(result)
+    # Track which folders we've seen on which pages to process them after files
+    all_subfolders = [] # List of (folder_name, page_idx)
     
-    # Process subfolders
-    if folders:
-        print(f"  Processing {len(folders)} subfolders...")
-        for idx, folder in enumerate(folders):
-            print(f"\n  [{idx+1}/{len(folders)}] Entering: {folder}")
+    for page_idx in range(1, total_pages + 1):
+        if total_pages > 1:
+            print(f"  [Page {page_idx}/{total_pages}]")
+            navigate_to_page(page_obj, page_idx)
+            
+        # Get items for current page
+        folders, files_with_occ = get_grid_items(page_obj)
+        
+        # Store folders for later recursion
+        for f in folders:
+            all_subfolders.append((f, page_idx))
+            
+        # Download all files on this page
+        if files_with_occ:
+            for filename, occurrence in files_with_occ:
+                if filename in ["My Records", "My Activity", "Group or Department"]:
+                    continue
+                
+                # Session recovery check before each download
+                ensure_logged_in(page_obj)
+                
+                # relative_path passed for metadata reconstruction
+                relative_path = os.path.join(*relative_parts, filename) if relative_parts else filename
+                
+                result = download_file_with_metadata(
+                    page_obj, 
+                    filename, 
+                    occurrence, 
+                    local_folder, 
+                    relative_path
+                )
+                if result:
+                    manifest_logger.log(result)
+    
+    # Process subfolders (re-navigating to the correct page if necessary)
+    if all_subfolders:
+        print(f"  Processing {len(all_subfolders)} subfolders...")
+        for idx, (folder, page_idx) in enumerate(all_subfolders):
+            print(f"\n  [{idx+1}/{len(all_subfolders)}] Entering: {folder} (from page {page_idx})")
             
             try:
+                # Ensure we are on the correct page to click the folder
+                if total_pages > 1:
+                    navigate_to_page(page_obj, page_idx)
+                
                 # Enter subfolder
                 click_folder(page_obj, folder)
                 
@@ -580,7 +651,7 @@ def download_folder_recursive(page_obj, current_path, output_base, results):
                     page_obj,
                     current_path + [folder],
                     output_base,
-                    results
+                    manifest_logger
                 )
                 
                 # Navigate back - use back button
@@ -588,10 +659,17 @@ def download_folder_recursive(page_obj, current_path, output_base, results):
                 page_obj.go_back(wait_until="domcontentloaded")
                 page_obj.wait_for_timeout(2000)
                 
-                # Verify we're back
+                # Verify we're back and on the right page
                 if not wait_for_grid(page_obj):
                     print("  [Warning] Grid didn't load after back, resetting...")
                     navigate_to_path(page_obj, current_path)
+                    if total_pages > 1:
+                        navigate_to_page(page_obj, page_idx)
+                else:
+                    # If we have multiple pages, we might need to verify we returned to page_idx
+                    # (VMR usually returns to the first page on 'back')
+                    if total_pages > 1:
+                        navigate_to_page(page_obj, page_idx)
                 
             except Exception as e:
                 print(f"  [Error] Failed to process subfolder '{folder}': {e}")
@@ -613,7 +691,7 @@ def run_migration():
     print("Downloads full folder structure with metadata")
     print("=" * 70)
     
-    results = []
+    manifest_logger = ManifestLogger(OUTPUT_DIR)
     
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -650,12 +728,15 @@ def run_migration():
                 page,
                 ["Group or Department_old"],
                 OUTPUT_DIR,
-                results
+                manifest_logger
             )
         except Exception as e:
             print(f"\n✗ Migration error: {e}")
-        
-        browser.close()
+        finally:
+            browser.close()
+    
+    # Consolidate results from JSONL to final manifest
+    results = manifest_logger.get_all_results()
     
     # Create summary report
     print("\n" + "=" * 70)
